@@ -37,12 +37,14 @@ class Settings(BaseSettings):
 
     # ── Email (Resend transactional API — outbound only) ───────────────────
     # Domain glitchexecutor.com is verified in Resend; any address on it works.
-    # No SMTP/IMAP creds needed for sending. Reply tracking will use IMAP
-    # against the actual mailbox host (separate sprint).
+    # We send from support@ (the only real mailbox on the domain) with a
+    # named display so recipients see "Tejas — Glitch Executor Labs" rather
+    # than a bare role address. Replies route back to support@ where the
+    # operator already reads.
     resend_api_key: str = ""
-    resend_from_email: str = "tejas@glitchexecutor.com"
-    resend_from_name: str = "Tejas"
-    resend_reply_to: str = "tejas@glitchexecutor.com"
+    resend_from_email: str = "support@glitchexecutor.com"
+    resend_from_name: str = "Tejas — Glitch Executor Labs"
+    resend_reply_to: str = "support@glitchexecutor.com"
 
     # Legacy aliases — kept so older code paths that still read
     # `gmail_sender_email` resolve to the Resend from address.
