@@ -70,8 +70,8 @@ _DRAFT_SCHEMA = {
 
 
 def render_user_prompt(lead: Lead, *, prior_context: str = "") -> str:
-    site_status = lead.current_site_status or "custom"
-    recipe = RECIPES.get(site_status) or RECIPES.get("custom")
+    platform = lead.pos_platform or lead.current_site_status or "custom"
+    recipe = RECIPES.get(platform) or RECIPES.get("custom")
     if recipe is None:
         raise RuntimeError(
             "Recipe library missing 'custom' fallback — playbook misconfigured"
@@ -85,12 +85,12 @@ def render_user_prompt(lead: Lead, *, prior_context: str = "") -> str:
         f"- shop_name: {lead.business_name}",
         f"- neighbourhood: {lead.city or 'Toronto'}",
         f"- province: {lead.province}",
-        f"- current_site_status: {site_status}",
+        f"- pos_platform: {platform}",
         f"- score: {lead.score}/100",
         f"- to_email: {lead.contact_email or '(unknown)'}",
         f"- website: {lead.website_url or '(none)'}",
         "",
-        f"## Recipe (selected by current_site_status={site_status})",
+        f"## Recipe (selected by pos_platform={platform})",
         f"- subject variants (pick ONE, do not invent): {list(recipe.subjects)}",
         f"- opener template: {recipe.opener!r}",
         "- body template (use as-is, only substitute {shop_name}):",

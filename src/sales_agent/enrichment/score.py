@@ -55,14 +55,26 @@ CHAIN_KEYWORDS: tuple[str, ...] = (
     "maryjane",                                 # MaryJane's Weed Dispensary
 )
 
-# Site-status fit bonus. The "weaker" the current site, the better the pitch lands.
-_SITE_BONUS: dict[str, int] = {
-    "none":       15,
-    "linktree":   15,
-    "builder":    10,
-    "lightspeed": 10,
-    "custom":      0,
+# Platform fit bonus. After the Apr-2026 product reframe, the pitch is
+# "we add a premium storefront on top of what you have, with AI SEO."
+# Brochure / no-site shops get the standalone pitch (most acute pain).
+# Dutchie / Blaze / TendyPOS shops get the additive-layer pitch (real
+# but slower-burn — they have something working).
+# Shopify shops are almost always chains; bench them out of the queue.
+_PLATFORM_BONUS: dict[str, int] = {
+    "none":      25,   # no site at all → easiest "we'll get you online" pitch
+    "brochure":  25,   # Squarespace/Wix/WP without real ordering
+    "dutchie":   20,   # working stack, AI SEO upgrade pitch lands
+    "blaze":     20,   # same shape as Dutchie
+    "tendypos":  20,   # same shape
+    "shopify":  -50,   # chains; wrong ICP
+    "custom":     0,
 }
+
+# Legacy alias retained for backwards compatibility — points at the
+# new bonus map until the old current_site_status field is fully
+# decommissioned.
+_SITE_BONUS = _PLATFORM_BONUS
 
 
 def _domain_of(url: str | None) -> str | None:
@@ -116,13 +128,14 @@ def score_lead(lead: Lead, *, domain_count: int) -> tuple[int, list[str]]:
     else:
         reasons.append("no_email")
 
-    # ── Site fit ────────────────────────────────────────────────────────
-    site = lead.current_site_status
-    if site:
-        bonus = _SITE_BONUS.get(site, 0)
+    # ── Platform fit ────────────────────────────────────────────────────
+    platform = lead.pos_platform or lead.current_site_status
+    if platform:
+        bonus = _PLATFORM_BONUS.get(platform, 0)
         if bonus:
+            sign = "+" if bonus > 0 else ""
             score += bonus
-            reasons.append(f"+{bonus} site_{site}")
+            reasons.append(f"{sign}{bonus} platform_{platform}")
 
     # ── Independent vs chain (multi-signal) ─────────────────────────────
     if domain_count >= 3:
@@ -141,7 +154,7 @@ def score_lead(lead: Lead, *, domain_count: int) -> tuple[int, list[str]]:
 
     # ── Worst-case quality floor ────────────────────────────────────────
     # No website AND no email = nothing the drafter can use. Cap low.
-    if site == "none" and not lead.contact_email:
+    if platform == "none" and not lead.contact_email:
         score = min(score, 25)
         reasons.append("cap=25 unreachable")
 
