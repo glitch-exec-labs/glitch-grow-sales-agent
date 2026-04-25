@@ -39,7 +39,10 @@ def _to_lead(r: asyncpg.Record) -> Lead:
 
 def _to_draft(r: asyncpg.Record) -> EmailDraft:
     d = dict(r)
-    # asyncpg returns UUID[] as list[UUID]; Pydantic accepts that directly.
+    # asyncpg returns UUID[] as list[UUID], but a NULL column comes back as
+    # None — coerce so Pydantic's `list[UUID]` validator doesn't reject it.
+    if d.get("prior_context_ids") is None:
+        d["prior_context_ids"] = []
     return EmailDraft.model_validate(d)
 
 
@@ -275,6 +278,9 @@ class DraftRepo:
         self._pool = pool
 
     async def insert(self, payload: EmailDraftCreate) -> EmailDraft:
+        """Insert a new draft. Any prior `pending` drafts for the same lead
+        are auto-superseded in the same transaction, so the operator's
+        approval queue always shows one pending draft per lead."""
         sql = f"""
         INSERT INTO sales_agent.email_drafts (
             lead_id, recipe_key, subject_variant, subject, body,
@@ -284,7 +290,15 @@ class DraftRepo:
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         RETURNING {_DRAFT_COLS}
         """
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                """
+                UPDATE sales_agent.email_drafts
+                SET approval_state = 'superseded'
+                WHERE lead_id = $1 AND approval_state = 'pending'
+                """,
+                payload.lead_id,
+            )
             row = await conn.fetchrow(
                 sql,
                 payload.lead_id, payload.recipe_key, payload.subject_variant,

@@ -17,8 +17,13 @@ class Settings(BaseSettings):
     # ── Postgres ────────────────────────────────────────────────────────────
     postgres_rw_url: str
 
-    # ── Discovery (Google Places API New, SA-impersonation auth) ───────────
+    # ── GCP — shared SA + project for Places + Vertex AI ──────────────────
     gcp_project_id: str = "capable-boulder-487806-j0"
+    gcp_target_sa: str = (
+        "glitch-vertex-ai@capable-boulder-487806-j0.iam.gserviceaccount.com"
+    )
+    gcp_vertex_region: str = "us-central1"
+    # Backward-compat alias — older code paths read gcp_places_target_sa.
     gcp_places_target_sa: str = (
         "glitch-vertex-ai@capable-boulder-487806-j0.iam.gserviceaccount.com"
     )
@@ -47,9 +52,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     google_api_key: str = ""
 
-    # ── Drafter ────────────────────────────────────────────────────────────
-    drafter_model: str = "claude-sonnet-4-6"
-    drafter_max_tokens: int = 1024
+    # ── Drafter (Gemini 2.5 Pro via Vertex AI, SA-impersonation auth) ──────
+    drafter_model: str = "gemini-2.5-pro"
+    # Gemini 2.5 Pro burns tokens on internal reasoning before emitting,
+    # so the budget covers thinking + output. 8192 leaves comfortable
+    # headroom even for verbose recipes; tune down for Flash.
+    drafter_max_tokens: int = 8192
 
     # ── HubSpot CRM mirror ────────────────────────────────────────────────
     hubspot_pat: str = ""                          # Private App token

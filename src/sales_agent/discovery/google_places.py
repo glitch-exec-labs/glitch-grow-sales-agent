@@ -157,11 +157,12 @@ class GooglePlacesClient:
 
 def default_client() -> GooglePlacesClient:
     """Construct a client from settings."""
-    if not settings.gcp_places_target_sa:
-        raise RuntimeError("GCP_PLACES_TARGET_SA not set in .env")
+    target_sa = settings.gcp_target_sa or settings.gcp_places_target_sa
+    if not target_sa:
+        raise RuntimeError("GCP_TARGET_SA not set in .env")
     if not settings.gcp_project_id:
         raise RuntimeError("GCP_PROJECT_ID not set in .env")
     return GooglePlacesClient(
-        target_sa=settings.gcp_places_target_sa,
+        target_sa=target_sa,
         project_id=settings.gcp_project_id,
     )

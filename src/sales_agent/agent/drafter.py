@@ -1,35 +1,36 @@
-"""Cold-email drafter — Claude Sonnet via the Anthropic SDK.
+"""Cold-email drafter — Gemini 2.5 Pro via Vertex AI.
+
+Auth: same SA-impersonation pattern as the Places worker. ADC picks up
+the box's attached Compute SA, which impersonates `glitch-vertex-ai@…`
+so all Vertex calls are attributed to the operations SA.
 
 Inputs per draft:
 - The lead row (`Lead`).
-- The recipe selected by `current_site_status` (private playbook recipes
-  override stubs at import time).
+- The recipe selected by `current_site_status` (private playbook
+  recipes override stubs at import time).
 - The brand fact sheet (private playbook → markdown loaded once).
-- Optional `<prior_context>` summary of relevant past drafts/edits/replies
-  to ground the model in what worked / failed before. v1 leaves this
-  empty; the recall layer plugs in once we have a few sends to learn from.
+- Optional `<prior_context>` summary of relevant past drafts/edits/
+  replies. v1 leaves this empty; the recall layer plugs in once we
+  have a few sends to learn from.
 
-Output: parsed JSON `{subject_variant, subject, body, …telemetry}`.
+Output: `DraftResult` with subject_variant, subject, body, and token
+telemetry. Structured JSON output is enforced via response_schema —
+we don't have to coax the model with prose instructions.
 
-The system prompt enforces tone + length + content constraints. The
-model is instructed to choose a subject from the recipe's variants
-(it MUST NOT invent new ones) and to substitute `{shop_name}` in the
-opener template, then return the final rendered body.
-
-We do not append the CASL footer here — the sender module appends it
-at send time so the footer + sender identity are controlled by infra,
-not the LLM.
+The CASL footer is appended by the sender at send time — never by the
+LLM — so footer + sender identity stay infra-controlled.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass
-from typing import Any
 
-from anthropic import AsyncAnthropic
+from google import genai
+from google.auth import default as google_default
+from google.auth.impersonated_credentials import Credentials as ImpersonatedCredentials
+from google.genai import types as genai_types
 
 from sales_agent.agent.brand import get_brand_fact_sheet
 from sales_agent.agent.prompts import get_system_prompt
@@ -38,6 +39,8 @@ from sales_agent.config import settings
 from sales_agent.db.models import Lead
 
 logger = logging.getLogger(__name__)
+
+CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 
 @dataclass
@@ -50,12 +53,25 @@ class DraftResult:
     output_tokens: int
 
 
+# JSON schema enforced via Vertex's response_schema. No more prose-coaxing
+# the model into well-formed JSON; the SDK guarantees the shape.
+_DRAFT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "subject_variant": {"type": "string"},
+        "subject":         {"type": "string"},
+        "body":            {"type": "string"},
+    },
+    "required": ["subject_variant", "subject", "body"],
+}
+
+
 # ─── Prompt construction ─────────────────────────────────────────────────────
 
 
 def render_user_prompt(lead: Lead, *, prior_context: str = "") -> str:
     site_status = lead.current_site_status or "custom"
-    recipe = RECIPES.get(site_status, RECIPES.get("custom"))
+    recipe = RECIPES.get(site_status) or RECIPES.get("custom")
     if recipe is None:
         raise RuntimeError(
             "Recipe library missing 'custom' fallback — playbook misconfigured"
@@ -90,34 +106,35 @@ def render_user_prompt(lead: Lead, *, prior_context: str = "") -> str:
 
     parts += [
         "",
-        "## Output",
-        "Return ONLY a JSON object, no prose, no code fences. Schema:",
-        "{",
-        '  "subject_variant": "<exact subject template you picked from the variants list>",',
-        '  "subject":         "<rendered subject with substitutions>",',
-        '  "body":            "<rendered body, opener + body, no signature, no CASL footer>"',
-        "}",
-        "",
-        "Hard rules: substitute {shop_name} with the actual shop name; if the opener template "
-        "is empty, omit the opener line entirely; keep the body ≤ 120 words; "
-        "do not add prices, claims, or URLs that are not in the brand fact sheet or recipe template.",
+        "## Output rules",
+        "- pick `subject_variant` from the variants list above; do not invent a new subject",
+        "- substitute {shop_name} with the actual shop name in the rendered subject + body",
+        "- if the opener template is empty, omit the opener line entirely",
+        "- keep the body ≤ 120 words",
+        "- do not add prices, claims, or URLs that are not in the brand fact sheet or recipe template",
+        "- the sender will append the CASL footer; do NOT include it",
     ]
     return "\n".join(parts)
 
 
-# ─── JSON parsing ────────────────────────────────────────────────────────────
-
-
-_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.MULTILINE)
-
-
-def parse_response_json(text: str) -> dict[str, Any]:
-    """Tolerate markdown code fences around the JSON Claude returns."""
-    cleaned = _FENCE_RE.sub("", text.strip())
-    return json.loads(cleaned)
-
-
 # ─── Drafter ─────────────────────────────────────────────────────────────────
+
+
+def _build_vertex_client() -> genai.Client:
+    """Construct a google-genai Client wired for Vertex with SA impersonation."""
+    source, _ = google_default(scopes=[CLOUD_PLATFORM_SCOPE])
+    imp = ImpersonatedCredentials(
+        source_credentials=source,
+        target_principal=settings.gcp_target_sa,
+        target_scopes=[CLOUD_PLATFORM_SCOPE],
+        lifetime=3600,
+    )
+    return genai.Client(
+        vertexai=True,
+        project=settings.gcp_project_id,
+        location=settings.gcp_vertex_region,
+        credentials=imp,
+    )
 
 
 class Drafter:
@@ -125,12 +142,12 @@ class Drafter:
         self,
         *,
         model: str | None = None,
-        max_tokens: int = 1024,
-        client: AsyncAnthropic | None = None,
+        max_tokens: int | None = None,
+        client: genai.Client | None = None,
     ) -> None:
-        self.client = client or AsyncAnthropic()
+        self.client = client or _build_vertex_client()
         self.model = model or settings.drafter_model
-        self.max_tokens = max_tokens
+        self.max_tokens = max_tokens or settings.drafter_max_tokens
 
     async def draft(
         self, lead: Lead, *, prior_context: str = "",
@@ -138,24 +155,32 @@ class Drafter:
         user_prompt = render_user_prompt(lead, prior_context=prior_context)
         system = get_system_prompt()
 
-        msg = await self.client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user_prompt}],
+        config = genai_types.GenerateContentConfig(
+            system_instruction=system,
+            max_output_tokens=self.max_tokens,
+            response_mime_type="application/json",
+            response_schema=_DRAFT_SCHEMA,
+            temperature=0.3,
         )
 
-        # Anthropic's TextBlock list — we ask for plain text JSON, expect one block.
-        text_blocks = [b.text for b in msg.content if getattr(b, "type", None) == "text"]
-        if not text_blocks:
-            raise RuntimeError(f"Drafter: empty response from {self.model}")
-        text = "\n".join(text_blocks).strip()
+        resp = await self.client.aio.models.generate_content(
+            model=self.model,
+            contents=user_prompt,
+            config=config,
+        )
+
+        text = (resp.text or "").strip()
+        if not text:
+            raise RuntimeError(
+                f"Drafter: empty response from {self.model}; "
+                f"finish_reason={getattr(resp.candidates[0], 'finish_reason', '?') if resp.candidates else '?'}"
+            )
 
         try:
-            parsed = parse_response_json(text)
+            parsed = json.loads(text)
         except json.JSONDecodeError as e:
             raise RuntimeError(
-                f"Drafter: model returned non-JSON output:\n{text[:500]}"
+                f"Drafter: model returned non-JSON output despite schema:\n{text[:500]}"
             ) from e
 
         for required in ("subject_variant", "subject", "body"):
@@ -164,11 +189,12 @@ class Drafter:
                     f"Drafter: missing field {required!r} in model output: {parsed!r}"
                 )
 
+        usage = resp.usage_metadata
         return DraftResult(
             subject_variant=str(parsed["subject_variant"]),
             subject=str(parsed["subject"]),
             body=str(parsed["body"]),
             model=self.model,
-            input_tokens=int(getattr(msg.usage, "input_tokens", 0) or 0),
-            output_tokens=int(getattr(msg.usage, "output_tokens", 0) or 0),
+            input_tokens=int(getattr(usage, "prompt_token_count", 0) or 0),
+            output_tokens=int(getattr(usage, "candidates_token_count", 0) or 0),
         )
