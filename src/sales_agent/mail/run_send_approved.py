@@ -138,8 +138,16 @@ async def _send_one(
         )
         return True
 
-    # Send via Resend
-    result = await resend_sender.send_plain(draft=draft, lead=lead)
+    # Send via Resend — branded HTML (with plain-text fallback) for cold
+    # email 1. The warm support@ sender has the deliverability headroom;
+    # the visual lift dramatically beats the plain-text rendering.
+    preview = (
+        f"What chains have that {lead.business_name} doesn't — "
+        "AI SEO + chain-quality storefront."
+    )
+    result = await resend_sender.send_branded_html(
+        draft=draft, lead=lead, preview_text=preview,
+    )
 
     # Persist the immutable record + link the draft
     send = await send_repo.insert(EmailSendCreate(

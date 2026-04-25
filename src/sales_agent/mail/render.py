@@ -40,13 +40,21 @@ _TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "cold_email.htm
 
 
 def render_cold_text(draft: EmailDraft, lead: Lead) -> str:
-    """Plain-text body with CASL footer. This is what cold email 1 sends.
+    """Plain-text body with URL block + CASL footer.
 
-    The drafter already wrote `body` with proper newlines, the demo URL
-    inline, and the soft CTA. We just append the signature + footer.
+    Recipes carry pure value-prop prose — the URL block (live demo +
+    Calendly) is appended here so the plain-text path matches what the
+    branded HTML template renders structurally (button + secondary
+    live-build line). Without this, the plain-text version would have
+    no demo / booking URLs at all (since they're not in the recipe body).
     """
+    booking_url = settings.booking_url or LANDING_URL
+    duration = settings.booking_duration_min
     return (
-        f"{draft.body}\n"
+        f"{draft.body.rstrip()}\n"
+        f"\n"
+        f"live demo: {DEMO_URL.replace('https://', '')}\n"
+        f"Book a {duration}-min walkthrough: {booking_url.replace('https://', '')}\n"
         f"\n"
         f"— {SENDER_NAME}\n"
         f"{settings.casl_sender_name} · {settings.casl_sender_address}\n"
