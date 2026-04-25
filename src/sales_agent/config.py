@@ -36,15 +36,18 @@ class Settings(BaseSettings):
     discovery_radius_m: int = 8000
 
     # ── Email (Resend transactional API — outbound only) ───────────────────
-    # Domain glitchexecutor.com is verified in Resend; any address on it works.
-    # We send from support@ (the only real mailbox on the domain) with a
-    # named display so recipients see "Tejas — Glitch Executor Labs" rather
-    # than a bare role address. Replies route back to support@ where the
-    # operator already reads.
+    # Two mailboxes on glitchexecutor.com, two purposes:
+    #   support@  → Google Workspace, used by Glitch sites' Resend wires
+    #               for transactional confirmations (lead-received emails).
+    #               DO NOT send cold outreach from here — protects the
+    #               transactional sender reputation.
+    #   tejas@    → Namecheap Private Email, sales-agent cold outreach.
+    # Both addresses are on the verified Resend domain so the same account
+    # can send for either; reputation is segmented by from address + tags.
     resend_api_key: str = ""
-    resend_from_email: str = "support@glitchexecutor.com"
-    resend_from_name: str = "Tejas — Glitch Executor Labs"
-    resend_reply_to: str = "support@glitchexecutor.com"
+    resend_from_email: str = "tejas@glitchexecutor.com"
+    resend_from_name: str = "Tejas"
+    resend_reply_to: str = "tejas@glitchexecutor.com"
 
     # Legacy aliases — kept so older code paths that still read
     # `gmail_sender_email` resolve to the Resend from address.
