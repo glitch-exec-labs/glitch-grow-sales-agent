@@ -1,39 +1,43 @@
-"""Cold-email drafter — Gemini 2.5 Pro via Vertex AI.
+"""Cold-email drafter — deterministic template renderer (default) +
+optional Gemini 2.5 Pro mode for future creative drafts.
 
-Auth: same SA-impersonation pattern as the Places worker. ADC picks up
-the box's attached Compute SA, which impersonates `glitch-vertex-ai@…`
-so all Vertex calls are attributed to the operations SA.
+Why template-only by default:
+The recipes in `glitch_grow_sales_playbook.recipes` are FULL TEMPLATES
+with `{shop_name}` placeholders. The drafter's job is substitution +
+subject selection — both deterministic operations. When we routed
+this through Gemini, the model occasionally drifted (rewrote the
+CTA, dropped lines, summarized the body). Drift is the enemy of
+predictable cold outreach.
 
-Inputs per draft:
-- The lead row (`Lead`).
-- The recipe selected by `current_site_status` (private playbook
-  recipes override stubs at import time).
-- The brand fact sheet (private playbook → markdown loaded once).
-- Optional `<prior_context>` summary of relevant past drafts/edits/
-  replies. v1 leaves this empty; the recall layer plugs in once we
-  have a few sends to learn from.
+So `Drafter.draft()` runs a pure substitution by default:
+  - Subject: hash(lead_id) % len(variants) — deterministic A/B.
+  - Body:    recipe.opener + '\\n\\n' + recipe.body, with shop_name
+             substituted everywhere via str.format.
+
+The Gemini path is preserved as `Drafter.draft_via_llm()` for future
+use cases that genuinely benefit from creative variation: post-reply
+drafts where prior_context informs the response, or per-shop mock-up
+captioning.
+
+Auth (LLM mode): same SA-impersonation pattern as the Places worker.
+ADC picks up the box's attached Compute SA, which impersonates
+`glitch-vertex-ai@…` so all Vertex calls are attributed to the
+operations SA.
 
 Output: `DraftResult` with subject_variant, subject, body, and token
-telemetry. Structured JSON output is enforced via response_schema —
-we don't have to coax the model with prose instructions.
+telemetry (zero for template mode).
 
 The CASL footer is appended by the sender at send time — never by the
-LLM — so footer + sender identity stay infra-controlled.
+drafter — so footer + sender identity stay infra-controlled.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
 
-from google import genai
-from google.auth import default as google_default
-from google.auth.impersonated_credentials import Credentials as ImpersonatedCredentials
-from google.genai import types as genai_types
-
-from sales_agent.agent.brand import get_brand_fact_sheet
-from sales_agent.agent.prompts import get_system_prompt
 from sales_agent.agent.recipes import RECIPES
 from sales_agent.config import settings
 from sales_agent.db.models import Lead
@@ -137,21 +141,91 @@ def _build_vertex_client() -> genai.Client:
     )
 
 
+def _pick_subject_variant(lead: Lead, variants: tuple[str, ...]) -> str:
+    """Hash-deterministic A/B pick. Same lead always renders the same
+    subject template across re-drafts, so per-lead subject choice is
+    stable and we can attribute open rates per variant cleanly."""
+    if not variants:
+        raise RuntimeError("Recipe has no subject variants")
+    h = int(hashlib.md5(str(lead.id).encode()).hexdigest(), 16)
+    return variants[h % len(variants)]
+
+
+def _resolve_recipe(lead: Lead):
+    platform = lead.pos_platform or lead.current_site_status or "custom"
+    recipe = RECIPES.get(platform) or RECIPES.get("custom")
+    if recipe is None:
+        raise RuntimeError("Recipe library missing 'custom' fallback")
+    return platform, recipe
+
+
+def render_template(lead: Lead) -> DraftResult:
+    """Pure-substitution renderer. No LLM, no network, deterministic."""
+    platform, recipe = _resolve_recipe(lead)
+    subject_template = _pick_subject_variant(lead, recipe.subjects)
+
+    fmt_args = {"shop_name": lead.business_name}
+    subject = subject_template.format(**fmt_args)
+
+    parts: list[str] = []
+    if recipe.opener:
+        parts.append(recipe.opener.format(**fmt_args))
+    parts.append(recipe.body.format(**fmt_args))
+    body = "\n\n".join(parts)
+
+    return DraftResult(
+        subject_variant=subject_template,
+        subject=subject,
+        body=body,
+        model="template",
+        input_tokens=0,
+        output_tokens=0,
+    )
+
+
 class Drafter:
+    """Default drafter — pure template substitution, no LLM call.
+
+    For future creative drafts (post-reply follow-ups, mock-up captions,
+    operator-edit re-rolls) use Drafter(use_llm=True) which routes
+    through Gemini 2.5 Pro on Vertex.
+    """
+
     def __init__(
         self,
         *,
+        use_llm: bool = False,
         model: str | None = None,
         max_tokens: int | None = None,
-        client: genai.Client | None = None,
     ) -> None:
-        self.client = client or _build_vertex_client()
+        self.use_llm = use_llm
         self.model = model or settings.drafter_model
         self.max_tokens = max_tokens or settings.drafter_max_tokens
+        self._client = None  # built lazily on first LLM call
 
     async def draft(
         self, lead: Lead, *, prior_context: str = "",
     ) -> DraftResult:
+        if not self.use_llm:
+            return render_template(lead)
+        return await self._draft_via_llm(lead, prior_context=prior_context)
+
+    async def _draft_via_llm(
+        self, lead: Lead, *, prior_context: str = "",
+    ) -> DraftResult:
+        """LLM-backed creative path. Used for follow-ups + edge cases
+        where genuine variation matters more than fidelity to a template."""
+        # Lazy imports keep template-only deploys lean (no google-genai
+        # required if use_llm stays False).
+        from google import genai
+        from google.genai import types as genai_types
+
+        from sales_agent.agent.brand import get_brand_fact_sheet
+        from sales_agent.agent.prompts import get_system_prompt
+
+        if self._client is None:
+            self._client = _build_vertex_client()
+
         user_prompt = render_user_prompt(lead, prior_context=prior_context)
         system = get_system_prompt()
 
@@ -163,7 +237,7 @@ class Drafter:
             temperature=0.3,
         )
 
-        resp = await self.client.aio.models.generate_content(
+        resp = await self._client.aio.models.generate_content(
             model=self.model,
             contents=user_prompt,
             config=config,

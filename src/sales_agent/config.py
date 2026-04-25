@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     google_api_key: str = ""
 
+    # ── Booking (Calendly / HubSpot Meetings — anything that takes a click) ─
+    # Public URL, not a secret. Used in plain-text CTAs and as the primary
+    # button target in the branded HTML email.
+    booking_url: str = ""
+    booking_duration_min: int = 30  # match the Calendly slot length
+
     # ── Drafter (Gemini 2.5 Pro via Vertex AI, SA-impersonation auth) ──────
     drafter_model: str = "gemini-2.5-pro"
     # Gemini 2.5 Pro burns tokens on internal reasoning before emitting,

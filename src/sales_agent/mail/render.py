@@ -27,6 +27,12 @@ DEMO_URL = "https://exotic420budz.com"
 LANDING_URL = "https://grow.glitchexecutor.com/budz"
 SENDER_NAME = "tejas"
 
+
+def _booking_url() -> str:
+    """Live booking URL from settings, with a sane fallback to the landing
+    page when no calendar link is configured (so the CTA still works in dev)."""
+    return settings.booking_url or LANDING_URL
+
 _TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "cold_email.html"
 
 
@@ -168,6 +174,8 @@ def render_branded_html(
         sender_name=SENDER_NAME,
         demo_url=DEMO_URL,
         landing_url=LANDING_URL,
+        booking_url=_booking_url(),
+        booking_duration=str(settings.booking_duration_min),
         casl_entity=html.escape(settings.casl_sender_name),
         casl_address=html.escape(settings.casl_sender_address),
         unsubscribe_url=unsubscribe_url,
