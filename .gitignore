@@ -58,3 +58,5 @@ uv.lock
 # Local DB dumps
 *.sql.gz
 *.dump
+_branded_email_preview.html
+_cold_email_plaintext_preview.txt
