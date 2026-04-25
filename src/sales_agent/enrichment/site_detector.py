@@ -1,24 +1,23 @@
-"""Classify a shop's website into the `current_site_status` enum.
+"""Detect a shop's POS / e-commerce platform from its website.
 
-Pattern-matching is fully deterministic and free — no LLM call. Each
-recipe in the playbook is keyed on this enum, so the classifier's job
-is to land on one of:
+Classifies into a `PosPlatform` enum that the recipe library keys on.
+The categories were derived empirically from the 77-lead Toronto cohort
+probe (see `migrations/0003_pos_platform.sql` header for definitions).
 
-    none        — HTTP error, blank page, no website at all
-    linktree    — Linktree, Bio.link, Beacons, lnk.bio, similar aggregators
-    builder     — Wix, Squarespace, Weebly, GoDaddy Sites, Carrd, WordPress.com
-    lightspeed  — Lightspeed Cannabis / Lightspeed eCom signatures
-    custom      — anything else (hand-coded, agency build, headless)
+Detection priority (highest signal first):
+    tendypos > dutchie > blaze > shopify > brochure > custom > none
 
-The classifier is intentionally conservative: when in doubt, returns
-`custom` so the recipe library defaults to the price-led, no-personalization
-opener instead of accidentally telling a shop their site looks like a
-template buy.
+We follow shop subdomains (`shop.*`, `order.*`, `store.*`, `menu.*`)
+because for cannabis retail the apex domain is often a Squarespace/WP
+brochure while the actual e-commerce backend lives on a subdomain
+hosted by Dutchie / Blaze / TendyPOS. Skipping the subdomain hides
+the platform that actually matters for the pitch.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -26,114 +25,150 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-SiteStatus = Literal["none", "linktree", "builder", "lightspeed", "custom"]
+PosPlatform = Literal[
+    "none", "brochure", "dutchie", "blaze", "tendypos", "shopify", "custom",
+]
 
 
-# Hosts that are themselves link-aggregator products. If the website_url
-# is on one of these, the shop has *no real site* — they live in someone
-# else's bio-link page.
+# Pattern, in priority order. First match wins.
+_POS_PATTERNS: tuple[tuple[PosPlatform, re.Pattern[str]], ...] = (
+    ("tendypos", re.compile(
+        r"tendy[a-z]*\.api\.unoapp\.io|tendypos\.com|tendy-budler", re.I,
+    )),
+    ("dutchie", re.compile(
+        r"dutchie\.com|embed\.dutchie|dutchie\.menu|cdn\.dutchie", re.I,
+    )),
+    ("blaze", re.compile(
+        r"blaze\.me|blazenow|blaze-now|cdn\.blaze[a-z]*\.io", re.I,
+    )),
+    ("shopify", re.compile(
+        r"cdn\.shopify\.com|myshopify\.com|/cdn/shop/", re.I,
+    )),
+)
+
+# Brochure-only signatures (Squarespace, Wix, WordPress) when no shop
+# subdomain or POS signature was detected on the apex.
+_BROCHURE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"squarespace-cdn\.com|static1\.squarespace", re.I),
+    re.compile(r"wixstatic\.com|wix\.com/website|_wix_", re.I),
+    re.compile(r"wp-content/|wp-includes/|wordpress\.com", re.I),
+)
+
+# Shop-subdomain hint in apex links — if the apex points at a `shop.*`,
+# fetch that and probe for POS signatures there too.
+_SHOP_LINK_RE = re.compile(
+    r'https?://(?:shop|order|store|menu)\.[a-z0-9.\-]+(?:/[a-z0-9.\-/_?=&%]*)?',
+    re.I,
+)
+
+# Blaze fallback: known Blaze shop URLs follow `/menu/<location>/` path
+# even when the bare `blaze.me` substring isn't in the HTML.
+_BLAZE_PATH_HINT = re.compile(
+    r'https?://shop\.[a-z0-9.\-]+/menu/[a-z0-9.\-/_]+', re.I,
+)
+
+
+def _host(url: str) -> str | None:
+    try:
+        host = urlparse(url if "://" in url else f"https://{url}").hostname
+    except (ValueError, TypeError):
+        return None
+    return host.lower().removeprefix("www.") if host else None
+
+
+async def _fetch(client: httpx.AsyncClient, url: str, *, timeout: float = 12.0) -> str:
+    try:
+        r = await client.get(url, follow_redirects=True, timeout=timeout)
+    except (httpx.TransportError, httpx.TimeoutException) as e:
+        logger.debug("fetch failed for %s: %s", url, e)
+        return ""
+    if r.status_code >= 400:
+        return ""
+    return r.text or ""
+
+
+def _classify(html_combined: str, shop_url: str | None) -> PosPlatform | None:
+    """Pure classifier: takes already-fetched HTML, returns a PosPlatform or None."""
+    if not html_combined:
+        return None
+    for tag, rx in _POS_PATTERNS:
+        if rx.search(html_combined):
+            return tag
+    # Blaze fallback by URL shape, when patterns missed.
+    if shop_url and _BLAZE_PATH_HINT.search(shop_url):
+        return "blaze"
+    return None
+
+
+async def detect_pos_platform(
+    url: str | None, client: httpx.AsyncClient,
+) -> PosPlatform:
+    """Top-level: fetch apex + (optional) shop subdomain, classify.
+
+    Returns "none" when the site is unreachable / blank, "brochure" when
+    a CMS signature is present without a real shop, "custom" when nothing
+    matches but the page exists, otherwise the matching POS platform.
+    """
+    if not url:
+        return "none"
+    apex = await _fetch(client, url)
+    if not apex or len(apex) < 200:
+        return "none"
+
+    # Find a linked shop subdomain in the apex; if so, fetch it too.
+    shop_url: str | None = None
+    m = _SHOP_LINK_RE.search(apex)
+    if m:
+        shop_url = m.group(0)
+
+    sub = await _fetch(client, shop_url) if shop_url else ""
+    combined = apex + "\n" + sub
+
+    pos = _classify(combined, shop_url)
+    if pos:
+        return pos
+
+    # No POS signature. Decide between brochure / custom.
+    for rx in _BROCHURE_PATTERNS:
+        if rx.search(apex):
+            return "brochure"
+    return "custom"
+
+
+# ─── Backwards-compatible legacy API ────────────────────────────────────────
+# `current_site_status` (none/linktree/builder/lightspeed/custom) is still
+# referenced by the old run_enrichment path. Map the new enum to the old
+# one so that column stays consistent for any downstream readers.
+
+LegacySiteStatus = Literal["none", "linktree", "builder", "lightspeed", "custom"]
+
+# Re-exported for the rest of the package to keep imports consistent.
+SiteStatus = LegacySiteStatus  # legacy alias
+
+# Hosts considered link aggregators — used by the contact_finder for
+# "don't pattern-guess at info@<host>" decisions; kept here for one
+# import site.
 LINKTREE_HOSTS: frozenset[str] = frozenset({
     "linktr.ee", "lnk.bio", "beacons.ai", "bio.link", "snipfeed.co",
     "linkin.bio", "stan.store", "withkoji.com", "campsite.bio",
 })
 
-# Substrings in HTML that indicate a hosted SaaS website builder.
-BUILDER_SIGNATURES: tuple[str, ...] = (
-    "wixstatic.com", "wix.com/website", "_wix_",
-    "squarespace.com", "static1.squarespace", "squarespace-cdn",
-    "weebly.com", "/weebly/",
-    "godaddy.com/sites", "godaddysites.com",
-    "carrd.co",
-    "wordpress.com",
-    # Shopify shouldn't really appear (cannabis-rejected), but if it does
-    # treat as builder — same conversation we'd have with a Wix shop.
-    "myshopify.com", "cdn.shopify.com", "/cdn/shop/",
-)
 
-# Lightspeed Cannabis / Lightspeed eCom signatures.
-LIGHTSPEED_SIGNATURES: tuple[str, ...] = (
-    "lightspeedhq.com",
-    "lightspeed-ecom",
-    "cdn.lightspeed",
-    "ecom-spazi",       # legacy Lightspeed eCom CDN
-    "lightspeed-cannabis",
-    "shoplightspeed.com",
-)
-
-# Linktree-style references that may appear inside an otherwise-custom site
-# (e.g., a shop with their own homepage that links out to a Linktree). If
-# these are present *and no other signature matches*, classify as linktree
-# because the shop is treating Linktree as their primary surface.
-LINKTREE_INPAGE: tuple[str, ...] = ("linktr.ee", "linktree.com", "lnk.bio")
-
-
-def _host_of(url: str) -> str | None:
-    try:
-        host = urlparse(url if "://" in url else f"https://{url}").hostname
-    except (ValueError, TypeError):
-        return None
-    if not host:
-        return None
-    return host.lower().removeprefix("www.")
-
-
-def classify_url_only(url: str | None) -> SiteStatus | None:
-    """Decide based on URL host alone. Returns None if a fetch is needed."""
-    if not url:
+def pos_to_legacy(pos: PosPlatform) -> LegacySiteStatus:
+    """Best-effort mapping for filling the legacy column."""
+    if pos == "none":
         return "none"
-    host = _host_of(url)
-    if not host:
-        return "none"
-    # The website_url IS a Linktree-style aggregator.
-    for h in LINKTREE_HOSTS:
-        if host == h or host.endswith("." + h):
-            return "linktree"
-    return None  # need to fetch the page to decide
-
-
-def classify_html(html: str) -> SiteStatus:
-    """Classify by signatures inside fetched HTML."""
-    if not html:
-        return "none"
-    if len(html) < 200:
-        # Pages this short are usually blank-template, redirect stubs, or
-        # error pages. Treat as no real site.
-        return "none"
-    lower = html.lower()
-    for sig in LIGHTSPEED_SIGNATURES:
-        if sig in lower:
-            return "lightspeed"
-    for sig in BUILDER_SIGNATURES:
-        if sig in lower:
-            return "builder"
-    for sig in LINKTREE_INPAGE:
-        if sig in lower:
-            return "linktree"
+    if pos == "brochure":
+        return "builder"          # closest legacy bucket
+    if pos in ("dutchie", "blaze", "tendypos", "shopify"):
+        return "custom"           # they have a real ecom backend
     return "custom"
 
 
 async def detect(
-    url: str | None,
-    client: httpx.AsyncClient,
-    *,
-    timeout: float = 15.0,
-) -> SiteStatus:
-    """Full classification: URL check first, then fetch + HTML check.
-
-    Returns `none` on network errors, timeouts, 4xx/5xx, or empty pages —
-    these are operationally indistinguishable from "no real site" for
-    the drafter's purposes.
-    """
-    if not url:
-        return "none"
-    by_url = classify_url_only(url)
-    if by_url is not None and by_url != "custom":
-        return by_url
-    try:
-        resp = await client.get(url, follow_redirects=True, timeout=timeout)
-    except (httpx.TransportError, httpx.TimeoutException) as e:
-        logger.debug("site_detector: fetch failed for %s: %s", url, e)
-        return "none"
-    if resp.status_code >= 400:
-        return "none"
-    return classify_html(resp.text)
+    url: str | None, client: httpx.AsyncClient, *, timeout: float = 12.0,
+) -> LegacySiteStatus:
+    """Legacy entry point used by the v1 run_enrichment path. Returns the
+    LEGACY enum value derived from the new pos_platform classification."""
+    pos = await detect_pos_platform(url, client)
+    return pos_to_legacy(pos)

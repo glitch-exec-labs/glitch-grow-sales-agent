@@ -28,6 +28,10 @@ LeadStatus = Literal[
 
 CurrentSiteStatus = Literal["none", "linktree", "builder", "lightspeed", "custom"]
 
+PosPlatform = Literal[
+    "none", "brochure", "dutchie", "blaze", "tendypos", "shopify", "custom",
+]
+
 Source = Literal["google_places", "agco", "manual"]
 
 ApprovalState = Literal["pending", "approved", "rejected", "edited", "superseded"]
@@ -68,6 +72,7 @@ class LeadEnrichment(BaseModel):
     contact_email_source: ContactEmailSource | None = None
     contact_email_verified: bool = False
     current_site_status: CurrentSiteStatus | None = None
+    pos_platform: PosPlatform | None = None
     instagram_handle: str | None = None
     score: int | None = None
 
@@ -99,6 +104,7 @@ class Lead(BaseModel):
     contact_email_verified: bool
 
     current_site_status: CurrentSiteStatus | None
+    pos_platform: PosPlatform | None = None
 
     score: int
     status: LeadStatus

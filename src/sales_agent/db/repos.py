@@ -64,7 +64,7 @@ _LEAD_COLS = """
     business_name, address, city, province, postal_code, lat, lng,
     phone, website_url, instagram_handle, contact_email,
     contact_email_source, contact_email_verified,
-    current_site_status,
+    current_site_status, pos_platform,
     score, status, paused_at, paused_reason, notes,
     hubspot_contact_id, hubspot_company_id, hubspot_deal_id, hubspot_synced_at
 """
@@ -161,8 +161,9 @@ class LeadRepo:
             contact_email_source   = COALESCE($3, contact_email_source),
             contact_email_verified = COALESCE($4, contact_email_verified),
             current_site_status    = COALESCE($5, current_site_status),
-            instagram_handle       = COALESCE($6, instagram_handle),
-            score                  = COALESCE($7, score)
+            pos_platform           = COALESCE($6, pos_platform),
+            instagram_handle       = COALESCE($7, instagram_handle),
+            score                  = COALESCE($8, score)
         WHERE id = $1
         RETURNING {_LEAD_COLS}
         """
@@ -171,7 +172,8 @@ class LeadRepo:
                 sql, lead_id,
                 patch.contact_email, patch.contact_email_source,
                 patch.contact_email_verified if patch.contact_email else None,
-                patch.current_site_status, patch.instagram_handle, patch.score,
+                patch.current_site_status, patch.pos_platform,
+                patch.instagram_handle, patch.score,
             )
         if row is None:
             raise LookupError(f"lead {lead_id} not found")
