@@ -1,12 +1,37 @@
 """Postgres access layer.
 
-Owns the `sales_agent.*` schema (asyncpg pool, repos, agent_memory with
-pgvector). Migrations live under `migrations/` and are managed with Alembic.
+Owns the `sales_agent.*` schema (see `migrations/0001_init_schema.sql`).
+Async access via asyncpg with a module-level pool singleton.
 
-Tables (to be created in the v1 migration):
-- `sales_agent.leads`         — every prospect, with enrichment + status.
-- `sales_agent.email_drafts`  — every drafted email + recipe + subject variant.
-- `sales_agent.email_sends`   — every send + tracking pixel id + reply state.
-- `sales_agent.lead_events`   — funnel-state-transition log.
-- `sales_agent.agent_memory`  — pgvector + tsvector decision log.
+Public surface:
+- `pool.connect() / pool.disconnect() / pool.pool()` — lifecycle.
+- `models.*`  — Pydantic row + create models with Literal-typed enums.
+- `repos.*`   — `LeadRepo`, `DraftRepo`, `SendRepo`, `EventRepo`,
+                `UnsubRepo`, `MemoryRepo`.
+
+Repos accept the asyncpg pool by constructor injection so tests can pass
+a fixture pool and so multiple agents (this one, future product agents)
+can share the same engine without globals leaking.
 """
+
+from sales_agent.db import models, pool, repos
+from sales_agent.db.repos import (
+    DraftRepo,
+    EventRepo,
+    LeadRepo,
+    MemoryRepo,
+    SendRepo,
+    UnsubRepo,
+)
+
+__all__ = [
+    "DraftRepo",
+    "EventRepo",
+    "LeadRepo",
+    "MemoryRepo",
+    "SendRepo",
+    "UnsubRepo",
+    "models",
+    "pool",
+    "repos",
+]
