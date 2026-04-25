@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     google_api_key: str = ""
 
+    # ── Drafter ────────────────────────────────────────────────────────────
+    drafter_model: str = "claude-sonnet-4-6"
+    drafter_max_tokens: int = 1024
+
     # ── HubSpot CRM mirror ────────────────────────────────────────────────
     hubspot_pat: str = ""                          # Private App token
     hubspot_pipeline_name: str = "Glitch Budz"
