@@ -35,12 +35,24 @@ class Settings(BaseSettings):
     discovery_center_lng: float = -79.4111
     discovery_radius_m: int = 8000
 
-    # ── Email ──────────────────────────────────────────────────────────────
-    gmail_oauth_client_id: str = ""
-    gmail_oauth_client_secret: str = ""
-    gmail_oauth_refresh_token: str = ""
-    gmail_sender_email: str = ""
-    gmail_sender_name: str = "Tejas"
+    # ── Email (Resend transactional API — outbound only) ───────────────────
+    # Domain glitchexecutor.com is verified in Resend; any address on it works.
+    # No SMTP/IMAP creds needed for sending. Reply tracking will use IMAP
+    # against the actual mailbox host (separate sprint).
+    resend_api_key: str = ""
+    resend_from_email: str = "tejas@glitchexecutor.com"
+    resend_from_name: str = "Tejas"
+    resend_reply_to: str = "tejas@glitchexecutor.com"
+
+    # Legacy aliases — kept so older code paths that still read
+    # `gmail_sender_email` resolve to the Resend from address.
+    @property
+    def gmail_sender_email(self) -> str:  # type: ignore[override]
+        return self.resend_from_email
+
+    @property
+    def gmail_sender_name(self) -> str:  # type: ignore[override]
+        return self.resend_from_name
 
     # ── CASL footer ────────────────────────────────────────────────────────
     casl_sender_name: str = "Glitch Executor Labs (Nuraveda)"
