@@ -179,11 +179,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA sales_agent
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-Then run migrations (Alembic — `migrations/` directory):
+Then run migrations:
 
 ```bash
-alembic upgrade head
+psql "$POSTGRES_RW_URL" -v ON_ERROR_STOP=1 -f migrations/0001_init_schema.sql
 ```
+
+See [`migrations/README.md`](migrations/README.md) for the full list.
 
 ### Run locally
 

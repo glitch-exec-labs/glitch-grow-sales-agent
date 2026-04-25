@@ -37,7 +37,6 @@ dependencies = [
 
   # DB
   "asyncpg>=0.30",
-  "alembic>=1.14",
   "pgvector>=0.3",
 
   # Scraping / parsing for enrichment
