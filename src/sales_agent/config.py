@@ -17,8 +17,11 @@ class Settings(BaseSettings):
     # ── Postgres ────────────────────────────────────────────────────────────
     postgres_rw_url: str
 
-    # ── Discovery ───────────────────────────────────────────────────────────
-    google_places_api_key: str = ""
+    # ── Discovery (Google Places API New, SA-impersonation auth) ───────────
+    gcp_project_id: str = "capable-boulder-487806-j0"
+    gcp_places_target_sa: str = (
+        "glitch-vertex-ai@capable-boulder-487806-j0.iam.gserviceaccount.com"
+    )
     discovery_center_lat: float = 43.7615
     discovery_center_lng: float = -79.4111
     discovery_radius_m: int = 8000
