@@ -15,7 +15,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ── Postgres ────────────────────────────────────────────────────────────
-    postgres_rw_url: str
+    # Optional at import time so processes that don't touch the DB
+    # (e.g. the Discord bot for non-DB slash commands) can still import
+    # `sales_agent.config`. `pool.connect()` raises if it's empty when
+    # someone actually tries to open a connection.
+    postgres_rw_url: str = ""
 
     # ── GCP — shared SA + project for Places + Vertex AI ──────────────────
     gcp_project_id: str = "capable-boulder-487806-j0"
