@@ -55,6 +55,9 @@ class DraftResult:
     model: str
     input_tokens: int
     output_tokens: int
+    # Hook-aware recipe key like "brochure:chains_have" so per-hook lift
+    # can be measured. Plain platform key still works as a fallback prefix.
+    recipe_key: str = ""
 
 
 # JSON schema enforced via Vertex's response_schema. No more prose-coaxing
@@ -141,14 +144,14 @@ def _build_vertex_client() -> genai.Client:
     )
 
 
-def _pick_subject_variant(lead: Lead, variants: tuple[str, ...]) -> str:
-    """Hash-deterministic A/B pick. Same lead always renders the same
-    subject template across re-drafts, so per-lead subject choice is
-    stable and we can attribute open rates per variant cleanly."""
-    if not variants:
-        raise RuntimeError("Recipe has no subject variants")
-    h = int(hashlib.md5(str(lead.id).encode()).hexdigest(), 16)
-    return variants[h % len(variants)]
+def _hash_pick(lead: Lead, options: tuple, *, salt: str = "") -> int:
+    """Stable hash → index. Same lead + salt always returns the same index,
+    so per-lead Hook + subject choice is stable across re-drafts and we
+    can attribute open / reply rate per (hook, subject) cleanly."""
+    if not options:
+        raise RuntimeError("hash_pick called with empty options tuple")
+    seed = f"{lead.id}:{salt}".encode()
+    return int(hashlib.md5(seed).hexdigest(), 16) % len(options)
 
 
 def _resolve_recipe(lead: Lead):
@@ -160,18 +163,35 @@ def _resolve_recipe(lead: Lead):
 
 
 def render_template(lead: Lead) -> DraftResult:
-    """Pure-substitution renderer. No LLM, no network, deterministic."""
+    """Pure-substitution renderer. No LLM, no network, deterministic.
+
+    For each lead:
+        1. Resolve recipe by `pos_platform`.
+        2. Hash-pick a Hook from recipe.hooks (different lead → different
+           hook → natural cohort variety; same lead → same hook on retry).
+        3. Hash-pick a subject variant from hook.subjects (separate salt
+           so subject A/B isn't perfectly correlated with hook choice).
+        4. Substitute `{shop_name}` in subject + opener + body.
+    """
     platform, recipe = _resolve_recipe(lead)
-    subject_template = _pick_subject_variant(lead, recipe.subjects)
+    if not recipe.hooks:
+        raise RuntimeError(f"Recipe {platform!r} has no hooks defined")
+
+    hook = recipe.hooks[_hash_pick(lead, recipe.hooks, salt="hook")]
+    subject_template = hook.subjects[_hash_pick(lead, hook.subjects, salt="subj")]
 
     fmt_args = {"shop_name": lead.business_name}
     subject = subject_template.format(**fmt_args)
 
     parts: list[str] = []
-    if recipe.opener:
-        parts.append(recipe.opener.format(**fmt_args))
-    parts.append(recipe.body.format(**fmt_args))
+    if hook.opener:
+        parts.append(hook.opener.format(**fmt_args))
+    parts.append(hook.body.format(**fmt_args))
     body = "\n\n".join(parts)
+
+    # Track the hook in the recipe_key field so /recipes lift can attribute
+    # open + reply rates per hook, not just per platform.
+    recipe_key_with_hook = f"{platform}:{hook.name}"
 
     return DraftResult(
         subject_variant=subject_template,
@@ -180,6 +200,7 @@ def render_template(lead: Lead) -> DraftResult:
         model="template",
         input_tokens=0,
         output_tokens=0,
+        recipe_key=recipe_key_with_hook,
     )
 
 

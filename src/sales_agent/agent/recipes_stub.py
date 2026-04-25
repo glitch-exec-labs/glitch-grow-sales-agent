@@ -3,9 +3,18 @@
 Real Glitch Budz copy lives in the private `glitch_grow_sales_playbook`
 package and overrides this stub at import time (see `sales_agent.agent.recipes`).
 
-Keys match `pos_platform` enum values from migrations/0003. If you're
-running the public engine without the private package installed, the
-agent will draft using these placeholders and the drafts won't sell.
+Data model (v3):
+    Recipe   keyed on `pos_platform` enum
+       └─ hooks: tuple[Hook, ...]  — multiple angles per platform
+                                     for A/B variety; drafter picks one
+                                     deterministically per lead via hash
+            └─ Hook
+                  name      — short identifier for analytics ("chains_have",
+                              "chatgpt_test", "time_budget", "ai_shift")
+                  subjects  — subject-line variants for this hook
+                  opener    — first sentence (or "" to omit)
+                  body      — value-prop prose; URL block + signature
+                              get appended by the render layer per format
 """
 
 from __future__ import annotations
@@ -14,36 +23,38 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class Recipe:
-    """A draft template keyed on `pos_platform`.
+class Hook:
+    """One framing angle for cold email 1.
 
-    Attributes:
-        key:        The pos_platform enum value this recipe handles.
-        subjects:   Subject-line variants (the tracker measures open rate per).
-        opener:    The first sentence — the personalization slot. Empty
-                    string means: omit the opener line, lead straight with
-                    the body.
-        body:      Recipe body excluding opener and signature.
+    Each Hook is fully self-contained — different subject, opener, and body.
+    The recipe library lists multiple Hooks per platform so a 30-lead batch
+    gets natural variety without manual rotation.
     """
 
-    key: str
+    name: str
     subjects: tuple[str, ...]
     opener: str
     body: str
 
 
-_PLACEHOLDER_BODY = (
-    "(placeholder body — install glitch_grow_sales_playbook to load real copy)"
+@dataclass(frozen=True)
+class Recipe:
+    """Per-platform recipe: a set of Hooks the drafter rotates between."""
+
+    key: str
+    hooks: tuple[Hook, ...]
+
+
+_PLACEHOLDER = Hook(
+    name="placeholder",
+    subjects=("(placeholder subject)",),
+    opener="(placeholder opener)",
+    body="(placeholder body — install glitch_grow_sales_playbook for real copy)",
 )
 
-# Generic stubs. Override these in glitch_grow_sales_playbook.recipes.
-# Keys mirror PosPlatform: none / brochure / dutchie / blaze / tendypos / shopify / custom.
+
+# Stub: one placeholder hook per platform. Override in playbook.
 RECIPES: dict[str, Recipe] = {
-    key: Recipe(
-        key=key,
-        subjects=("(placeholder subject)",),
-        opener="(placeholder opener)" if key != "custom" else "",
-        body=_PLACEHOLDER_BODY,
-    )
+    key: Recipe(key=key, hooks=(_PLACEHOLDER,))
     for key in ("none", "brochure", "dutchie", "blaze", "tendypos", "shopify", "custom")
 }

@@ -94,7 +94,7 @@ async def main() -> None:
                 fail_count += 1
                 continue
 
-            recipe_key = lead.current_site_status or "custom"
+            recipe_key = result.recipe_key or (lead.pos_platform or lead.current_site_status or "custom")
             draft = await draft_repo.insert(EmailDraftCreate(
                 lead_id=lead.id,
                 recipe_key=recipe_key,
