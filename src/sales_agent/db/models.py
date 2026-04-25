@@ -106,6 +106,12 @@ class Lead(BaseModel):
     paused_reason: str | None
     notes: str | None
 
+    # HubSpot mirror (Option A — Postgres canonical, HubSpot downstream)
+    hubspot_contact_id: str | None = None
+    hubspot_company_id: str | None = None
+    hubspot_deal_id: str | None = None
+    hubspot_synced_at: datetime | None = None
+
 
 # ─── Email draft ─────────────────────────────────────────────────────────────
 

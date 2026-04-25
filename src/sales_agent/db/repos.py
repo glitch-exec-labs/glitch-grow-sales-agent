@@ -62,7 +62,8 @@ _LEAD_COLS = """
     phone, website_url, instagram_handle, contact_email,
     contact_email_source, contact_email_verified,
     current_site_status,
-    score, status, paused_at, paused_reason, notes
+    score, status, paused_at, paused_reason, notes,
+    hubspot_contact_id, hubspot_company_id, hubspot_deal_id, hubspot_synced_at
 """
 
 _DRAFT_COLS = """
@@ -226,6 +227,38 @@ class LeadRepo:
                 """,
                 lead_id, actor, reason,
             )
+
+    async def set_hubspot_ids(
+        self,
+        lead_id: UUID,
+        *,
+        contact_id: str | None,
+        company_id: str | None,
+        deal_id: str | None,
+        synced_at: Any,
+    ) -> Lead:
+        """Persist the HubSpot mirror ids back to leads after a successful sync.
+
+        Uses COALESCE so we don't blow away an existing id when the sync layer
+        only resolved one of the three (e.g. company succeeded but contact had
+        no email yet).
+        """
+        sql = f"""
+        UPDATE sales_agent.leads SET
+            hubspot_contact_id = COALESCE($2, hubspot_contact_id),
+            hubspot_company_id = COALESCE($3, hubspot_company_id),
+            hubspot_deal_id    = COALESCE($4, hubspot_deal_id),
+            hubspot_synced_at  = $5
+        WHERE id = $1
+        RETURNING {_LEAD_COLS}
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                sql, lead_id, contact_id, company_id, deal_id, synced_at,
+            )
+        if row is None:
+            raise LookupError(f"lead {lead_id} not found")
+        return _to_lead(row)
 
     async def funnel(self) -> list[FunnelSnapshot]:
         sql = "SELECT status, lead_count, lead_count_7d, lead_count_24h FROM sales_agent.funnel_v"
@@ -406,6 +439,17 @@ class SendRepo:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(sql, thread_id)
         return _to_send(row) if row else None
+
+    async def set_hubspot_engagement(self, send_id: UUID, engagement_id: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE sales_agent.email_sends
+                SET hubspot_engagement_id = $2
+                WHERE id = $1
+                """,
+                send_id, engagement_id,
+            )
 
     async def daily_count(self) -> int:
         """Count of initial-send emails sent today (Toronto local). Excludes follow-ups

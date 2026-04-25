@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     google_api_key: str = ""
 
+    # ── HubSpot CRM mirror ────────────────────────────────────────────────
+    hubspot_pat: str = ""                          # Private App token
+    hubspot_pipeline_name: str = "Glitch Budz"
+    hubspot_sync_enabled: bool = False
+    hubspot_portal_id: str = ""                    # optional, informational
+
     # ── Server ─────────────────────────────────────────────────────────────
     agent_run_token: str = ""
     outreach_daily_cap: int = 5
