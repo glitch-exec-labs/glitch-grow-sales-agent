@@ -25,6 +25,8 @@ from sales_agent.db.models import EmailDraft, Lead
 
 DEMO_URL = "https://exotic420budz.com"
 LANDING_URL = "https://grow.glitchexecutor.com/budz"
+# Lowercase by deliberate brand-voice choice — recipients see a person,
+# not a press release.
 SENDER_NAME = "tejas"
 
 
@@ -40,23 +42,20 @@ _TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "cold_email.htm
 
 
 def render_cold_text(draft: EmailDraft, lead: Lead) -> str:
-    """Plain-text body with URL block + CASL footer.
+    """Plain-text body with sign-off + CASL footer.
 
-    Recipes carry pure value-prop prose — the URL block (live demo +
-    Calendly) is appended here so the plain-text path matches what the
-    branded HTML template renders structurally (button + secondary
-    live-build line). Without this, the plain-text version would have
-    no demo / booking URLs at all (since they're not in the recipe body).
+    The recipe body now carries the URL block inline (in the prose's
+    natural flow), so we no longer append "live demo: ...\\n book here:
+    ..." after the body — that would duplicate. Render just appends
+    the personal sign-off + the legally-required CASL identification
+    + unsubscribe note.
     """
-    booking_url = settings.booking_url or LANDING_URL
-    duration = settings.booking_duration_min
     return (
         f"{draft.body.rstrip()}\n"
         f"\n"
-        f"live demo: {DEMO_URL.replace('https://', '')}\n"
-        f"Book a {duration}-min walkthrough: {booking_url.replace('https://', '')}\n"
+        f"— {SENDER_NAME}, north york\n"
         f"\n"
-        f"— {SENDER_NAME}\n"
+        f"---\n"
         f"{settings.casl_sender_name} · {settings.casl_sender_address}\n"
         f"reply 'stop' to unsubscribe\n"
     )

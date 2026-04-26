@@ -138,16 +138,12 @@ async def _send_one(
         )
         return True
 
-    # Send via Resend — branded HTML (with plain-text fallback) for cold
-    # email 1. The warm support@ sender has the deliverability headroom;
-    # the visual lift dramatically beats the plain-text rendering.
-    preview = (
-        f"What chains have that {lead.business_name} doesn't — "
-        "AI SEO + chain-quality storefront."
-    )
-    result = await resend_sender.send_branded_html(
-        draft=draft, lead=lead, preview_text=preview,
-    )
+    # Send via Resend — PLAIN TEXT for cold email 1.
+    # Recipe v4 voice is deliberately lowercase, first-person, casual —
+    # plain text reads as "a person typed me" while HTML reads as
+    # "marketing email." HTML template stays in mail/templates/ for
+    # email 2 (post-reply follow-ups + customer onboarding).
+    result = await resend_sender.send_plain(draft=draft, lead=lead)
 
     # Persist the immutable record + link the draft
     send = await send_repo.insert(EmailSendCreate(
