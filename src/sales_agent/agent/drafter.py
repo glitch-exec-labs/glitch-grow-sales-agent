@@ -144,6 +144,18 @@ def _build_vertex_client() -> genai.Client:
     )
 
 
+def _clean_host(url: str | None) -> str:
+    """Bare hostname for personalization: drop scheme + www. + trailing /.
+    Returns empty string when the lead has no URL."""
+    if not url:
+        return ""
+    s = url.strip().rstrip("/")
+    for scheme in ("https://", "http://"):
+        if s.startswith(scheme):
+            s = s[len(scheme):]
+    return s.removeprefix("www.")
+
+
 def _hash_pick(lead: Lead, options: tuple, *, salt: str = "") -> int:
     """Stable hash → index. Same lead + salt always returns the same index,
     so per-lead Hook + subject choice is stable across re-drafts and we
@@ -180,7 +192,19 @@ def render_template(lead: Lead) -> DraftResult:
     hook = recipe.hooks[_hash_pick(lead, recipe.hooks, salt="hook")]
     subject_template = hook.subjects[_hash_pick(lead, hook.subjects, salt="subj")]
 
-    fmt_args = {"shop_name": lead.business_name}
+    # Personalization slots available to recipe templates:
+    # {shop_name}    — always set; falls back to "your shop" if missing
+    # {website_url}  — the bare hostname (no scheme, no trailing slash);
+    #                  empty string when the lead has no website (drafter
+    #                  treats this as a render-time signal that the
+    #                  pos_platform=none recipe was selected, where the
+    #                  hook body doesn't reference the URL)
+    # {city}         — neighbourhood / city; falls back to "your area"
+    fmt_args = {
+        "shop_name": lead.business_name or "your shop",
+        "website_url": _clean_host(lead.website_url),
+        "city": lead.city or "your area",
+    }
     subject = subject_template.format(**fmt_args)
 
     parts: list[str] = []

@@ -25,9 +25,10 @@ from sales_agent.db.models import EmailDraft, Lead
 
 DEMO_URL = "https://exotic420budz.com"
 LANDING_URL = "https://grow.glitchexecutor.com/budz"
-# Lowercase by deliberate brand-voice choice — recipients see a person,
-# not a press release.
-SENDER_NAME = "tejas"
+# Full name on the sign-off — the body voice is casual lowercase but the
+# signature is a real name (Title Case proper noun) so the recipient
+# knows who's emailing them.
+SENDER_NAME = "Tejas Karan Agrawal"
 
 
 def _booking_url() -> str:
@@ -53,7 +54,7 @@ def render_cold_text(draft: EmailDraft, lead: Lead) -> str:
     return (
         f"{draft.body.rstrip()}\n"
         f"\n"
-        f"— {SENDER_NAME}, north york\n"
+        f"— {SENDER_NAME}\n"
         f"\n"
         f"---\n"
         f"{settings.casl_sender_name} · {settings.casl_sender_address}\n"
