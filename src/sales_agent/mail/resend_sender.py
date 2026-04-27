@@ -124,6 +124,15 @@ def _from_header() -> str:
     return settings.resend_from_email
 
 
+def _safe_tag(s: str) -> str:
+    """Resend tag values: ASCII letters, numbers, underscores, dashes only.
+    Coerce anything else to `-` so we can pass arbitrary platform / recipe
+    keys without 422-ing the API."""
+    import re
+
+    return re.sub(r"[^A-Za-z0-9_-]", "-", s) or "unknown"
+
+
 # ─── Public surface ──────────────────────────────────────────────────────────
 
 
@@ -147,9 +156,13 @@ async def send_plain(
         "reply_to": settings.resend_reply_to,
         "subject":  draft.subject,
         "text":     body_text,
+        # Resend tags: ASCII letters, numbers, underscores, dashes only.
+        # recipe_key carries platform:hook_name (e.g. "blaze:switching_cost_safe")
+        # so the colon needs to be sanitized for tag use; the DB still stores
+        # the canonical colon form.
         "tags":     [
-            {"name": "recipe", "value": draft.recipe_key},
-            {"name": "platform", "value": (lead.pos_platform or "unknown")},
+            {"name": "recipe", "value": _safe_tag(draft.recipe_key)},
+            {"name": "platform", "value": _safe_tag(lead.pos_platform or "unknown")},
             {"name": "follow_up_seq", "value": "0"},
         ],
     }
@@ -195,8 +208,8 @@ async def send_branded_html(
         "text":     text_body,
         "html":     html_body,
         "tags":     [
-            {"name": "recipe", "value": draft.recipe_key},
-            {"name": "platform", "value": (lead.pos_platform or "unknown")},
+            {"name": "recipe", "value": _safe_tag(draft.recipe_key)},
+            {"name": "platform", "value": _safe_tag(lead.pos_platform or "unknown")},
             {"name": "format", "value": "branded_html"},
         ],
     }

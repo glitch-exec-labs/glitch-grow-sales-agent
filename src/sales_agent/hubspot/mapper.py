@@ -85,14 +85,25 @@ def send_to_email_engagement_props(
 
     `direction` is "EMAIL" for outbound, "INCOMING_EMAIL" for replies.
     HubSpot expects the timestamp in milliseconds since epoch.
+
+    HubSpot deprecated separate `hs_email_from_email` / `hs_email_to_email`
+    fields — they now derive those from the structured `hs_email_headers`
+    JSON property. Build that JSON shape instead so the API doesn't 400.
     """
+    import json
+
     timestamp_ms = int(send.sent_at.timestamp() * 1000)
+    headers = {
+        "from": {"email": send.from_email, "firstName": "", "lastName": ""},
+        "to": [{"email": send.to_email, "firstName": "", "lastName": ""}],
+        "cc": [],
+        "bcc": [],
+    }
     return {
         "hs_timestamp":      timestamp_ms,
         "hs_email_direction": direction,
         "hs_email_subject":  send.subject,
         "hs_email_text":     send.body,
-        "hs_email_from_email": send.from_email,
-        "hs_email_to_email":  send.to_email,
+        "hs_email_headers":  json.dumps(headers),
         "hs_email_status":    "SENT",
     }
