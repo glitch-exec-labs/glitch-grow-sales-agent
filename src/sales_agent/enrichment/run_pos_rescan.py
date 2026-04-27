@@ -36,8 +36,15 @@ HTTP_HEADERS = {
 }
 
 
-async def _all_leads(p) -> list[Lead]:
-    sql = """
+async def _all_leads(p, *, only_unclassified: bool = True) -> list[Lead]:
+    """By default, scan only leads that don't yet have a pos_platform set
+    AND aren't paused (chain filter pauses anything we wouldn't pitch
+    anyway, no point re-fetching their sites). Pass only_unclassified=False
+    to force a full re-scan of every lead in the DB."""
+    where = "WHERE 1=1"
+    if only_unclassified:
+        where += " AND pos_platform IS NULL AND status != 'paused'"
+    sql = f"""
     SELECT id, created_at, updated_at, source, source_id, agco_license,
            business_name, address, city, province, postal_code, lat, lng,
            phone, website_url, instagram_handle, contact_email,
@@ -46,6 +53,7 @@ async def _all_leads(p) -> list[Lead]:
            score, status, paused_at, paused_reason, notes,
            hubspot_contact_id, hubspot_company_id, hubspot_deal_id, hubspot_synced_at
     FROM sales_agent.leads
+    {where}
     ORDER BY business_name
     """
     async with p.acquire() as conn:
