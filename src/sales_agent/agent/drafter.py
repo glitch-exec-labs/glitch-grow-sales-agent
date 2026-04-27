@@ -145,15 +145,26 @@ def _build_vertex_client() -> genai.Client:
 
 
 def _clean_host(url: str | None) -> str:
-    """Bare hostname for personalization: drop scheme + www. + trailing /.
-    Returns empty string when the lead has no URL."""
+    """Bare hostname for personalization: drop scheme + www. + path/query.
+
+    Hunny Pot's stored website_url was the full deep-link
+    `thehunnypot.com/4936-yonge-street-north-york-cannabis-menu` —
+    we want just `thehunnypot.com` in cold-email prose.
+
+    Returns empty string when the lead has no URL.
+    """
     if not url:
         return ""
-    s = url.strip().rstrip("/")
+    s = url.strip()
     for scheme in ("https://", "http://"):
         if s.startswith(scheme):
             s = s[len(scheme):]
-    return s.removeprefix("www.")
+    s = s.removeprefix("www.")
+    # Drop path / query / fragment — keep only the hostname.
+    for sep in ("/", "?", "#"):
+        if sep in s:
+            s = s.split(sep, 1)[0]
+    return s
 
 
 def _hash_pick(lead: Lead, options: tuple, *, salt: str = "") -> int:
