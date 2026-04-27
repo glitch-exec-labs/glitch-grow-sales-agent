@@ -35,7 +35,7 @@ from sales_agent.db import DraftRepo, LeadRepo, SendRepo, UnsubRepo, pool
 from sales_agent.db.models import EmailDraft, EmailSendCreate, Lead
 from sales_agent.hubspot import client as hub_client
 from sales_agent.hubspot import sync as hub_sync
-from sales_agent.mail import resend_sender
+from sales_agent.mail import gmail_sender, resend_sender
 
 logger = logging.getLogger(__name__)
 
@@ -138,12 +138,16 @@ async def _send_one(
         )
         return True
 
-    # Send via Resend — PLAIN TEXT for cold email 1.
-    # Recipe v4 voice is deliberately lowercase, first-person, casual —
-    # plain text reads as "a person typed me" while HTML reads as
-    # "marketing email." HTML template stays in mail/templates/ for
-    # email 2 (post-reply follow-ups + customer onboarding).
-    result = await resend_sender.send_plain(draft=draft, lead=lead)
+    # Send — provider switch on settings.mail_provider.
+    # 'gmail'  → google-api-python-client + SA domain-wide delegation.
+    #             Recommended for cold sales: highest Primary placement,
+    #             replies thread to operator's Sent folder, looks human.
+    # 'resend' → Resend transactional API (kept available for parity /
+    #             future transactional flows).
+    if settings.mail_provider == "gmail":
+        result = await gmail_sender.send_plain(draft=draft, lead=lead)
+    else:
+        result = await resend_sender.send_plain(draft=draft, lead=lead)
 
     # Persist the immutable record + link the draft
     send = await send_repo.insert(EmailSendCreate(

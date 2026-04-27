@@ -35,6 +35,20 @@ class Settings(BaseSettings):
     discovery_center_lng: float = -79.4111
     discovery_radius_m: int = 8000
 
+    # ── Email provider switch ──────────────────────────────────────────────
+    # "gmail"  → google-api-python-client via SA + domain-wide delegation
+    #             (recommended for cold sales: highest Primary placement,
+    #             replies thread to your Sent folder natively, looks like
+    #             a real human typed it)
+    # "resend" → Resend transactional API (kept for parity / future
+    #             transactional flows; suboptimal for cold)
+    mail_provider: str = "gmail"
+
+    # ── Gmail Send (via SA domain-wide delegation, no key file needed) ─────
+    # The SA is already configured for delegation in Workspace admin; the
+    # subject is the user the SA acts AS (i.e. the from address).
+    gmail_subject_user: str = "support@glitchexecutor.com"
+
     # ── Email (Resend transactional API — outbound only) ───────────────────
     # Cold outreach sends from support@glitchexecutor.com — already warm
     # from the Glitch sites' transactional Resend wire, so Gmail's
