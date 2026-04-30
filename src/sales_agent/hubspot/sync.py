@@ -219,6 +219,13 @@ async def sync_send(send_repo: SendRepo, lead: Lead, send: EmailSend) -> None:
         engagement_id = await _create_email_engagement(props, lead)
         if engagement_id:
             await send_repo.set_hubspot_engagement(send.id, engagement_id)
+
+        stage_id = await _resolve_stage_id("Sent")
+        if stage_id and lead.hubspot_deal_id:
+            await client.request(
+                "PATCH", f"/crm/v3/objects/deals/{lead.hubspot_deal_id}",
+                json={"properties": {"dealstage": stage_id}},
+            )
     except Exception:
         logger.exception("hubspot.sync: sync_send failed for send=%s", send.id)
 
