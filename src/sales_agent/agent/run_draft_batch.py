@@ -36,7 +36,7 @@ async def _top_scored_with_email(repo_pool, limit: int) -> list[Lead]:
         business_name, address, city, province, postal_code, lat, lng,
         phone, website_url, instagram_handle, contact_email,
         contact_email_source, contact_email_verified,
-        current_site_status,
+        current_site_status, pos_platform,
         score, status, paused_at, paused_reason, notes,
         hubspot_contact_id, hubspot_company_id, hubspot_deal_id, hubspot_synced_at
     FROM sales_agent.leads
